@@ -1,0 +1,412 @@
+################################################################################
+# COWS 척도 심리측정 분석 - 성별 차이 분석 포함
+################################################################################
+
+# 환경 초기화
+rm(list = ls())
+graphics.off()
+options(scipen = 999)
+
+# 패키지 로드
+if(!require(psych)) install.packages("psych")
+if(!require(lavaan)) install.packages("lavaan")
+if(!require(corrplot)) install.packages("corrplot")
+if(!require(GPArotation)) install.packages("GPArotation")
+
+library(psych)
+library(lavaan)
+library(corrplot)
+library(GPArotation)
+
+################################################################################
+# 메인 분석 함수
+################################################################################
+
+analyze_cows <- function() {
+  
+  # 1. 데이터 로드
+  cat("\n==============================================================================\n")
+  cat("                      COWS 척도 심리측정 분석 시작\n")
+  cat("==============================================================================\n\n")
+  
+  data <- read.csv("~/Desktop/cows.csv")
+  
+  # 2. 기본 정보
+  cat("1. 데이터 정보\n")
+  cat("------------------------------------------------------------------------------\n")
+  cat("- 표본 크기: N =", nrow(data), "\n")
+  cat("- 평균 연령:", round(mean(data$age, na.rm = TRUE), 1), "±", 
+      round(sd(data$age, na.rm = TRUE), 1), "세\n")
+  
+  # 성별 분포
+  sex_table <- table(data$sex)
+  cat("- 성별 분포:\n")
+  cat("  남성:", sex_table[1], "명 (", round(sex_table[1]/sum(sex_table)*100, 1), "%)\n")
+  cat("  여성:", sex_table[2], "명 (", round(sex_table[2]/sum(sex_table)*100, 1), "%)\n\n")
+  
+  # 3. COWS 척도 추출
+  cows_items <- data[, paste0("cows_", 1:11)]
+  
+  # 척도 총점 계산
+  cows_total <- rowMeans(cows_items, na.rm = TRUE)
+  
+  # SOWS 총점
+  sows_cols <- paste0("sows_", 1:16)
+  sows_exist <- sows_cols[sows_cols %in% names(data)]
+  if(length(sows_exist) > 0) {
+    sows_items <- data[, sows_exist]
+    sows_total <- rowMeans(sows_items, na.rm = TRUE)
+  }
+  
+  # OCS 총점
+  ocs_cols <- paste0("ocs_", 1:3)
+  ocs_exist <- ocs_cols[ocs_cols %in% names(data)]
+  if(length(ocs_exist) > 0) {
+    ocs_items <- data[, ocs_exist]
+    ocs_total <- rowMeans(ocs_items, na.rm = TRUE)
+  }
+  
+  # 성별 간 차이 분석
+  cat("2. 성별 간 차이 분석\n")
+  cat("------------------------------------------------------------------------------\n")
+  
+  # COWS 성별 차이
+  cat("\nCOWS 점수:\n")
+  cows_male <- cows_total[data$sex == 1]
+  cows_female <- cows_total[data$sex == 2]
+  cat("  남성: M =", round(mean(cows_male), 2), "± SD =", round(sd(cows_male), 2), "\n")
+  cat("  여성: M =", round(mean(cows_female), 2), "± SD =", round(sd(cows_female), 2), "\n")
+  
+  t_cows <- t.test(cows_total ~ sex, data = data)
+  cat("  t =", round(t_cows$statistic, 2), ", p =", round(t_cows$p.value, 3), "\n")
+  
+  # SOWS 성별 차이
+  if(exists("sows_total")) {
+    cat("\nSOWS 점수:\n")
+    sows_male <- sows_total[data$sex == 1]
+    sows_female <- sows_total[data$sex == 2]
+    cat("  남성: M =", round(mean(sows_male), 2), "± SD =", round(sd(sows_male), 2), "\n")
+    cat("  여성: M =", round(mean(sows_female), 2), "± SD =", round(sd(sows_female), 2), "\n")
+    
+    t_sows <- t.test(sows_total ~ sex, data = data)
+    cat("  t =", round(t_sows$statistic, 2), ", p =", round(t_sows$p.value, 3), "\n")
+  }
+  
+  # OCS 성별 차이
+  if(exists("ocs_total")) {
+    cat("\nOCS-3 점수:\n")
+    ocs_male <- ocs_total[data$sex == 1]
+    ocs_female <- ocs_total[data$sex == 2]
+    cat("  남성: M =", round(mean(ocs_male), 2), "± SD =", round(sd(ocs_male), 2), "\n")
+    cat("  여성: M =", round(mean(ocs_female), 2), "± SD =", round(sd(ocs_female), 2), "\n")
+    
+    t_ocs <- t.test(ocs_total ~ sex, data = data)
+    cat("  t =", round(t_ocs$statistic, 2), ", p =", round(t_ocs$p.value, 3), "\n")
+  }
+  
+  cat("\n")
+  
+  # 4. 표준화
+  cat("3. 척도 표준화\n")
+  cat("------------------------------------------------------------------------------\n")
+  cows_std <- scale(cows_items)
+  cat("✓ COWS 11개 항목 Z-score 표준화 완료\n\n")
+  
+  # 5. 신뢰도 분석
+  cat("4. 신뢰도 분석\n")
+  cat("------------------------------------------------------------------------------\n")
+  alpha_res <- psych::alpha(cows_items, check.keys = TRUE)
+  alpha_val <- alpha_res$total$raw_alpha
+  
+  cat("Cronbach's Alpha =", round(alpha_val, 3), "\n")
+  if(alpha_val >= 0.8) {
+    cat("→ 우수한 신뢰도\n")
+  } else if(alpha_val >= 0.7) {
+    cat("→ 적절한 신뢰도\n")
+  } else {
+    cat("→ 개선 필요\n")
+  }
+  
+  cat("\n항목-총점 상관:\n")
+  item_cor <- round(alpha_res$item.stats[, "r.drop"], 3)
+  names(item_cor) <- paste0("Item", 1:11)
+  print(item_cor)
+  cat("\n")
+  
+  # 6. 상관행렬 
+  cor_mat <- cor(cows_items, use = "pairwise.complete.obs")
+  
+  # 7. 요인분석 적합성
+  cat("5. 요인분석 적합성\n")
+  cat("------------------------------------------------------------------------------\n")
+  
+  # KMO
+  kmo <- KMO(cor_mat)
+  cat("KMO =", round(kmo$MSA, 3))
+  if(kmo$MSA >= 0.7) cat(" (적합)\n")
+  else cat(" (부적합 가능성)\n")
+  
+  # Bartlett
+  bart <- cortest.bartlett(cor_mat, n = nrow(cows_items))
+  cat("Bartlett χ² =", round(bart$chisq, 2), ", p =", format.pval(bart$p.value), "\n\n")
+  
+  # 8. 평행분석
+  cat("6. 요인 수 결정\n")
+  cat("------------------------------------------------------------------------------\n")
+  
+  set.seed(123)
+  pa <- fa.parallel(cows_items, fm = "ml", fa = "fa", n.iter = 100, plot = FALSE)
+  
+  # 고유값
+  eigen_vals <- eigen(cor_mat)$values
+  
+  cat("평행분석 제안 요인 수:", pa$nfact, "\n")
+  cat("Kaiser 기준 (고유값>1):", sum(eigen_vals > 1), "\n")
+  
+  cat("\n고유값:\n")
+  for(i in 1:5) {
+    cat("  요인", i, ":", round(eigen_vals[i], 3), "\n")
+  }
+  
+  # 최종 요인 수
+  n_fac <- max(1, pa$nfact)
+  cat("\n→ 선택된 요인 수:", n_fac, "\n\n")
+  
+  # 9. 요인분석
+  cat("7. 탐색적 요인분석\n")
+  cat("------------------------------------------------------------------------------\n")
+  
+  fa_res <- fa(cows_items, nfactors = n_fac, rotate = "oblimin", fm = "ml")
+  
+  cat("요인 적재량:\n")
+  print(fa_res$loadings, cutoff = 0.3, sort = TRUE)
+  
+  cat("\n공통성:\n")
+  comm <- round(fa_res$communalities, 3)
+  names(comm) <- paste0("Item", 1:11)
+  print(comm)
+  
+  cat("\n설명 분산:\n")
+  if(n_fac == 1) {
+    var_exp <- fa_res$Vaccounted
+    cat("- 설명 분산:", round(var_exp[2] * 100, 1), "%\n")
+  } else {
+    var_by_factor <- round(fa_res$Vaccounted[2,] * 100, 1)
+    names(var_by_factor) <- paste0("Factor", 1:n_fac)
+    print(var_by_factor)
+    cat("- 총 설명 분산:", round(sum(fa_res$Vaccounted[2,]) * 100, 1), "%\n")
+  }
+  
+  # 요인 간 상관 (2요인 이상일 때)
+  if(n_fac > 1) {
+    cat("\n요인 간 상관:\n")
+    factor_cor <- fa_res$Phi
+    if(!is.null(factor_cor)) {
+      print(round(factor_cor, 3))
+    }
+  }
+  cat("\n")
+  
+  # 10. SOWS/OCS 상관
+  cat("8. 수렴/판별 타당도\n")
+  cat("------------------------------------------------------------------------------\n")
+  
+  # SOWS 신뢰도
+  if(exists("sows_total")) {
+    sows_alpha <- psych::alpha(sows_items, check.keys = TRUE, warnings = FALSE)$total$raw_alpha
+    cat("SOWS: α =", round(sows_alpha, 3), "\n")
+  }
+  
+  # OCS 신뢰도
+  if(exists("ocs_total")) {
+    ocs_alpha <- psych::alpha(ocs_items, check.keys = TRUE, warnings = FALSE)$total$raw_alpha
+    cat("OCS: α =", round(ocs_alpha, 3), "\n")
+  }
+  
+  # 상관분석
+  if(exists("sows_total") | exists("ocs_total")) {
+    scales_df <- data.frame(COWS = cows_total)
+    if(exists("sows_total")) scales_df$SOWS <- sows_total
+    if(exists("ocs_total")) scales_df$OCS <- ocs_total
+    
+    cor_scales <- cor(scales_df, use = "pairwise.complete.obs")
+    cat("\n척도 간 상관:\n")
+    print(round(cor_scales, 3))
+    
+    # 상관 유의성 검정
+    cor_test <- corr.test(scales_df, use = "pairwise", adjust = "none")
+    cat("\np-values:\n")
+    print(round(cor_test$p, 4))
+  }
+  
+  # 11. AVE 및 복합신뢰도 계산
+  cat("\n9. AVE 및 복합신뢰도\n")
+  cat("------------------------------------------------------------------------------\n")
+  
+  if(n_fac == 1) {
+    # 단일 요인
+    loadings <- fa_res$loadings[,1]
+    ave <- sum(loadings^2) / length(loadings)
+    cr <- sum(loadings)^2 / (sum(loadings)^2 + sum(1 - loadings^2))
+    
+    cat("AVE =", round(ave, 3))
+    if(ave >= 0.5) cat(" (양호)\n")
+    else cat(" (개선 필요)\n")
+    
+    cat("CR =", round(cr, 3))
+    if(cr >= 0.7) cat(" (양호)\n")
+    else cat(" (개선 필요)\n")
+    
+  } else if(n_fac == 2) {
+    # 2요인 구조
+    loadings_f1 <- fa_res$loadings[,1]
+    loadings_f2 <- fa_res$loadings[,2]
+    
+    # 각 요인별 주요 항목 선택 (0.4 이상)
+    items_f1 <- which(abs(loadings_f1) > 0.4)
+    items_f2 <- which(abs(loadings_f2) > 0.4)
+    
+    # Factor 1 AVE & CR
+    if(length(items_f1) > 0) {
+      ave_f1 <- sum(loadings_f1[items_f1]^2) / length(items_f1)
+      sum_load_f1 <- sum(abs(loadings_f1[items_f1]))
+      cr_f1 <- sum_load_f1^2 / (sum_load_f1^2 + sum(1 - loadings_f1[items_f1]^2))
+      
+      cat("\nFactor 1:\n")
+      cat("  항목:", paste0("Item", items_f1), "\n")
+      cat("  AVE =", round(ave_f1, 3))
+      if(ave_f1 >= 0.5) cat(" (양호)\n")
+      else cat(" (개선 필요)\n")
+      cat("  CR =", round(cr_f1, 3))
+      if(cr_f1 >= 0.7) cat(" (양호)\n")
+      else cat(" (개선 필요)\n")
+    }
+    
+    # Factor 2 AVE & CR
+    if(length(items_f2) > 0) {
+      ave_f2 <- sum(loadings_f2[items_f2]^2) / length(items_f2)
+      sum_load_f2 <- sum(abs(loadings_f2[items_f2]))
+      cr_f2 <- sum_load_f2^2 / (sum_load_f2^2 + sum(1 - loadings_f2[items_f2]^2))
+      
+      cat("\nFactor 2:\n")
+      cat("  항목:", paste0("Item", items_f2), "\n")
+      cat("  AVE =", round(ave_f2, 3))
+      if(ave_f2 >= 0.5) cat(" (양호)\n")
+      else cat(" (개선 필요)\n")
+      cat("  CR =", round(cr_f2, 3))
+      if(cr_f2 >= 0.7) cat(" (양호)\n")
+      else cat(" (개선 필요)\n")
+    }
+    
+    # 요인 간 판별타당도
+    if(exists("ave_f1") && exists("ave_f2") && !is.null(fa_res$Phi)) {
+      factor_correlation <- abs(fa_res$Phi[1,2])
+      cat("\n요인 간 판별타당도:\n")
+      cat("  요인 간 상관: r =", round(factor_correlation, 3), "\n")
+      cat("  √AVE(F1) =", round(sqrt(ave_f1), 3), "\n")
+      cat("  √AVE(F2) =", round(sqrt(ave_f2), 3), "\n")
+      
+      if(sqrt(ave_f1) > factor_correlation && sqrt(ave_f2) > factor_correlation) {
+        cat("  → 판별타당도 충족\n")
+      } else {
+        cat("  → 판별타당도 미충족\n")
+      }
+    }
+  }
+  
+  # 12. CFA
+  cat("\n10. 확인적 요인분석\n")
+  cat("------------------------------------------------------------------------------\n")
+  
+  # 모델 정의
+  if(n_fac == 1) {
+    cfa_model <- '
+      COWS =~ cows_1 + cows_2 + cows_3 + cows_4 + cows_5 + 
+              cows_6 + cows_7 + cows_8 + cows_9 + cows_10 + cows_11
+    '
+  } else if(n_fac == 2) {
+    cfa_model <- '
+      F1 =~ cows_3 + cows_8 + cows_10 + cows_2 + cows_9 + cows_11
+      F2 =~ cows_4 + cows_6 + cows_7 + cows_1 + cows_11
+    '
+  }
+  
+  tryCatch({
+    cfa_fit <- cfa(cfa_model, data = data, estimator = "MLR")
+    fit_idx <- fitMeasures(cfa_fit, c("chisq", "df", "pvalue", "cfi", "tli", "rmsea", "srmr"))
+    
+    cat("모델 적합도:\n")
+    cat("χ²(", fit_idx["df"], ") =", round(fit_idx["chisq"], 2), 
+        ", p =", format.pval(fit_idx["pvalue"]), "\n")
+    cat("CFI =", round(fit_idx["cfi"], 3), "\n")
+    cat("TLI =", round(fit_idx["tli"], 3), "\n")
+    cat("RMSEA =", round(fit_idx["rmsea"], 3), "\n")
+    cat("SRMR =", round(fit_idx["srmr"], 3), "\n")
+    
+  }, error = function(e) {
+    cat("CFA 실행 오류:", e$message, "\n")
+  })
+  
+  # 13. 저장
+  cat("\n==============================================================================\n")
+  cat("                              결과 저장\n")
+  cat("==============================================================================\n")
+  
+  # 표준화 데이터 저장
+  data_std <- cbind(data, cows_std)
+  write.csv(data_std, "cows_standardized.csv", row.names = FALSE)
+  cat("✓ 표준화 데이터: cows_standardized.csv\n")
+  
+  # 성별 차이 결과 저장
+  sink("sex_differences.txt")
+  cat("성별 간 차이 분석 결과\n")
+  cat("====================\n\n")
+  cat("COWS:\n")
+  cat("  남성 (n=", length(cows_male), "): M =", round(mean(cows_male), 2), 
+      ", SD =", round(sd(cows_male), 2), "\n")
+  cat("  여성 (n=", length(cows_female), "): M =", round(mean(cows_female), 2), 
+      ", SD =", round(sd(cows_female), 2), "\n")
+  cat("  t =", round(t_cows$statistic, 2), ", p =", round(t_cows$p.value, 3), "\n\n")
+  
+  if(exists("t_sows")) {
+    cat("SOWS:\n")
+    cat("  남성: M =", round(mean(sows_male), 2), ", SD =", round(sd(sows_male), 2), "\n")
+    cat("  여성: M =", round(mean(sows_female), 2), ", SD =", round(sd(sows_female), 2), "\n")
+    cat("  t =", round(t_sows$statistic, 2), ", p =", round(t_sows$p.value, 3), "\n\n")
+  }
+  
+  if(exists("t_ocs")) {
+    cat("OCS-3:\n")
+    cat("  남성: M =", round(mean(ocs_male), 2), ", SD =", round(sd(ocs_male), 2), "\n")
+    cat("  여성: M =", round(mean(ocs_female), 2), ", SD =", round(sd(ocs_female), 2), "\n")
+    cat("  t =", round(t_ocs$statistic, 2), ", p =", round(t_ocs$p.value, 3), "\n")
+  }
+  sink()
+  cat("✓ 성별 차이 분석: sex_differences.txt\n")
+  
+  cat("\n분석 완료!\n")
+  
+  # 분석 결과 요약
+  cat("\n==============================================================================\n")
+  cat("                           주요 분석 결과 요약\n")
+  cat("==============================================================================\n")
+  cat("• COWS 척도는", n_fac, "요인 구조로 확인됨\n")
+  cat("• 전체 신뢰도 α =", round(alpha_val, 3), "\n")
+  if(exists("cor_scales")) {
+    cat("• COWS-SOWS 상관 r =", round(cor_scales[1,2], 3), "\n")
+    if(ncol(cor_scales) > 2) {
+      cat("• COWS-OCS 상관 r =", round(cor_scales[1,3], 3), "\n")
+    }
+  }
+  cat("• 성별 간 유의한 차이:", 
+      ifelse(t_cows$p.value < 0.05, "COWS", ""), 
+      ifelse(exists("t_sows") && t_sows$p.value < 0.05, "SOWS", ""),
+      ifelse(exists("t_ocs") && t_ocs$p.value < 0.05, "OCS-3", ""),
+      ifelse(t_cows$p.value >= 0.05 && 
+               (!exists("t_sows") || t_sows$p.value >= 0.05) && 
+               (!exists("t_ocs") || t_ocs$p.value >= 0.05), "없음", ""), "\n")
+  cat("==============================================================================\n")
+}
+
+# 함수 실행
+analyze_cows()
